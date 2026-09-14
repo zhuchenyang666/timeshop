@@ -1,7 +1,7 @@
 export const ROUND_SECONDS = 30
 
 export const PLAN_PRODUCTS = [
-  { id: 'cloth-shoes', name: '白布鞋', icon: '👟', price: 1.5 },
+  { id: 'cloth-shoes', name: '白布鞋', icon: '👟', price: 2 },
   { id: 'thermos', name: '老式暖水瓶', icon: '🫖', price: 2 },
   { id: 'shirt', name: '的确良衬衫', icon: '👔', price: 3 },
 ]
@@ -29,12 +29,19 @@ export const CATALOG = [
   { id: 'sneakers', name: '运动鞋', icon: '👟', cost: 18, suggested: 30 },
   { id: 'flares', name: '喇叭裤', icon: '👖', cost: 12, suggested: 22 },
   { id: 'radio', name: '录音机', icon: '📻', cost: 45, suggested: 68 },
-  { id: 'noodles', name: '方便面', icon: '🍜', cost: 0.4, suggested: 0.8 },
-  { id: 'cola', name: '可口可乐', icon: '🥤', cost: 0.5, suggested: 1 },
+  { id: 'noodles', name: '方便面', icon: '🍜', cost: 1, suggested: 2 },
+  { id: 'cola', name: '可口可乐', icon: '🥤', cost: 1, suggested: 2 },
   { id: 'dress', name: '花裙子', icon: '👗', cost: 15, suggested: 28 },
   { id: 'watch', name: '电子表', icon: '⌚', cost: 10, suggested: 18 },
   { id: 'shampoo', name: '洗发水', icon: '🧴', cost: 3, suggested: 6 },
   { id: 'thermos', name: '老式暖水瓶', icon: '🫖', cost: 2, suggested: 3 },
+  { id: 'mug', name: '搪瓷杯', icon: '☕', cost: 1, suggested: 2 },
+  { id: 'biscuits', name: '饼干', icon: '🍪', cost: 1, suggested: 2 },
+  { id: 'soap', name: '肥皂', icon: '🧼', cost: 1, suggested: 2 },
+  { id: 'flashlight', name: '手电筒', icon: '🔦', cost: 4, suggested: 8 },
+  { id: 'umbrella', name: '雨伞', icon: '☂️', cost: 5, suggested: 10 },
+  { id: 'toy-car', name: '玩具汽车', icon: '🚗', cost: 6, suggested: 12 },
+  { id: 'notebook', name: '笔记本', icon: '📒', cost: 1, suggested: 2 },
 ]
 
 export const MARKET_CUSTOMERS = [
@@ -48,20 +55,19 @@ export const MARKET_CUSTOMERS = [
   { name: '旅客', icon: '🧔', wants: 'noodles', request: '赶车来不及了，有方便面吗？' },
 ]
 
+export function getPlanDialogue(product, customer) {
+  const isWanted = product.id === customer.choice
+  return isWanted
+    ? { owner: customer.reply, customer: customer.leave }
+    : { owner: '这里只有' + product.name + '。', customer: '这也不是我想要的商品。' }
+}
+
 export function settleSale(shelfItem, customer) {
-  if (!shelfItem || shelfItem.id !== customer.wants || shelfItem.stock < 1) {
-    return { units: 0, revenue: 0, happiness: 0, message: '货架上没有想要的商品，顾客失望离开。' }
-  }
-
-  if (shelfItem.price > shelfItem.suggested * 1.2) {
-    return { units: 0, revenue: 0, happiness: 0, message: '价格太高，顾客嫌贵转身走了。' }
-  }
-
-  const units = shelfItem.price <= shelfItem.suggested * 0.8 ? Math.min(2, shelfItem.stock) : 1
+  if (!shelfItem || shelfItem.id !== customer.wants || shelfItem.stock < 1) return null
   return {
-    units,
-    revenue: units * shelfItem.price,
+    units: 1,
+    revenue: shelfItem.price,
     happiness: 2,
-    message: units === 2 ? '价格实惠，顾客一次买了两件！' : '价格合适，成交一单！',
+    message: '好的，' + shelfItem.name + '卖给您一件。',
   }
 }

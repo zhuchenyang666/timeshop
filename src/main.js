@@ -5,8 +5,4 @@ import App from './App.vue'
 
 createApp(App).mount('#app')
 
-registerSW({
-  immediate: true,
-  onOfflineReady: () => window.dispatchEvent(new Event('pwa-ready')),
-  onRegisterError: () => window.dispatchEvent(new Event('pwa-error')),
-})
+registerSW({ immediate: true })
