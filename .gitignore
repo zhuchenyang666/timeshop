@@ -27,3 +27,6 @@ Thumbs.db
 
 # doc需求文档
 doc
+# workbuddy生成文件
+.workbuddy
+.codex

@@ -4,18 +4,17 @@ import {
   CATALOG,
   MARKET_CUSTOMERS,
   PLAN_CUSTOMERS,
-  PLAN_PRODUCTS,
   ROUND_SECONDS,
   getPlanDialogue,
   pickMarketProduct,
+  pickPlanProducts,
   settleSale,
 } from './game.js'
 
 const MARKET_ROUND_SECONDS = 60
 const MIN_INITIAL_STOCK = 6
 const MAX_RESTOCKS = 6
-const RESTOCK_TIME_COST = 10
-const PLAN_CUSTOMER_SWITCHES = [22, 14, 7]
+const PLAN_CUSTOMER_SWITCHES = [50, 40, 30, 20, 10]
 const phase = ref('intro')
 const timeLeft = ref(ROUND_SECONDS)
 const planCustomerIndex = ref(0)
@@ -32,21 +31,31 @@ const vintageStockRequest = ref(null)
 const restockCount = ref(0)
 const customerServed = ref(false)
 const isOnline = ref(navigator.onLine)
-const plan = reactive({revenue: 0, sold: 0})
+const plan = reactive({revenue: 0, sold: 0, matched: 0})
+const planResult = ref(null)
+const planQueue = ref([])
+const planShelf = ref([])
 const market = reactive({revenue: 0, happiness: 0, customers: 0, sold: 0})
 let timer
 let nextCustomerTimer
 
-const planCustomer = computed(() => PLAN_CUSTOMERS[planCustomerIndex.value])
+const planCustomer = computed(() => planQueue.value[planCustomerIndex.value] || PLAN_CUSTOMERS[0])
 const stars = computed(() => Math.max(1, Math.round((market.happiness / Math.max(1, market.customers * 2)) * 5)))
 const marketComment = computed(() => stars.value >= 4
     ? '商品丰富，顾客盈门！'
     : '留意顾客需求和商品搭配，生意会更好。')
 const restockBlockedReason = computed(() => {
   if (restockCount.value >= MAX_RESTOCKS) return `本局最多补货 ${MAX_RESTOCKS} 次，补货机会已经用完。`
-  if (timeLeft.value < RESTOCK_TIME_COST) return '剩余时间不足 10 秒，来不及回仓库补货。'
   return ''
 })
+
+function computePlanStars() {
+  if (plan.sold === 0) return 1
+  const ratio = plan.matched / plan.sold
+  if (ratio >= 0.8) return 3
+  if (ratio >= 0.4) return 2
+  return 1
+}
 
 function clearGameTimers() {
   clearInterval(timer)
@@ -63,9 +72,11 @@ function startRound(nextPhase) {
   marketNotice.value = null
   vintageStockRequest.value = null
   if (nextPhase === 'plan') {
+    planQueue.value = [...PLAN_CUSTOMERS].sort(() => Math.random() - 0.5)
+    planShelf.value = pickPlanProducts()
     planCustomerIndex.value = 0
     planServed.value = []
-    Object.assign(plan, {revenue: 0, sold: 0})
+    Object.assign(plan, {revenue: 0, sold: 0, matched: 0})
   }
   if (nextPhase === 'market') {
     shelves.value = Array(12).fill(null)
@@ -89,8 +100,20 @@ function tick() {
   }
   if (timeLeft.value <= 0) {
     clearGameTimers()
-    phase.value = phase.value === 'plan' ? 'plan-result' : 'market-result'
+    if (phase.value === 'plan') {
+      planResult.value = {revenue: plan.revenue, sold: plan.sold, matched: plan.matched, stars: computePlanStars()}
+      phase.value = 'plan-result'
+    } else {
+      phase.value = 'market-result'
+    }
   }
+}
+
+function declinePlanCustomer() {
+  if (planServed.value.includes(planCustomerIndex.value)) return
+  message.value = '不好意思，没有哈。'
+  customerFollowUp.value = '唉，那我去别家看看吧。'
+  planServed.value = [...planServed.value, planCustomerIndex.value]
 }
 
 function answerPlanCustomer(product) {
@@ -99,8 +122,9 @@ function answerPlanCustomer(product) {
   message.value = dialogue.owner
   customerFollowUp.value = dialogue.customer
   if (dialogue.sold) {
-    plan.revenue += dialogue.revenue
+    plan.revenue = Math.round((plan.revenue + dialogue.revenue) * 10) / 10
     plan.sold += 1
+    if (dialogue.matched) plan.matched += 1
     planServed.value = [...planServed.value, planCustomerIndex.value]
   }
 }
@@ -167,7 +191,6 @@ function confirmStocking() {
     message.value = item
         ? '找到了，' + item.name + '已经补上，顾客还在等您。'
         : '还是没有顾客想要的货品，顾客失望离开，并建议老板下次记得进货。'
-    timer = setInterval(tick, 1000)
     if (!item) scheduleNextCustomer()
     return
   }
@@ -179,7 +202,7 @@ function beginMarketSale() {
   warehouseOpen.value = false
   timeLeft.value = MARKET_ROUND_SECONDS
   nextMarketCustomer()
-  if (marketStage.value === 'selling' && !missingProduct.value) timer = setInterval(tick, 1000)
+  timer = setInterval(tick, 1000)
 }
 
 function nextMarketCustomer() {
@@ -191,7 +214,6 @@ function nextMarketCustomer() {
   market.customers += 1
   const item = shelves.value.find((entry) => entry?.id === customer.wants)
   if (!item || item.stock < 1) {
-    clearInterval(timer)
     missingProduct.value = product
     message.value = '本店暂时没有' + product.name + '。'
   } else {
@@ -204,7 +226,6 @@ function goToWarehouse() {
   const product = missingProduct.value
   missingProduct.value = null
   restockCount.value += 1
-  timeLeft.value -= RESTOCK_TIME_COST
   marketStage.value = 'restocking'
   warehouseOpen.value = true
   message.value = '等我去查下仓库，看看能不能进到' + product.name + '。'
@@ -216,7 +237,6 @@ function skipRestock() {
   missingProduct.value = null
   customerServed.value = true
   message.value = '不好意思，' + product.name + '暂时没有，顾客失望离开了。'
-  if (timeLeft.value > 0) timer = setInterval(tick, 1000)
   scheduleNextCustomer()
 }
 
@@ -270,19 +290,18 @@ onBeforeUnmount(() => {
 <template>
   <main class="app-shell" :class="{
     'landing-shell': phase === 'intro' || phase === 'mode-select',
+    'plan-shell': phase === 'plan',
     'market-shell': phase === 'market',
     'warehouse-open': phase === 'market' && marketStage !== 'selling' && warehouseOpen,
   }">
     <header v-if="phase !== 'intro' && phase !== 'mode-select'" class="topbar">
-      <button v-if="phase === 'market'" class="home-button" @click="restart">← 返回首页</button>
-      <div v-else class="topbar-brand"><span class="seal">时</span><strong>时光小卖部</strong></div>
+      <button class="home-button" @click="restart">← 返回首页</button>
       <div class="topbar-actions">
         <button v-if="phase === 'market'" class="warehouse-button" :class="{ active: warehouseOpen }"
                 :disabled="marketStage === 'selling'" aria-controls="warehouse-drawer" :aria-expanded="warehouseOpen"
                 @click="warehouseOpen = !warehouseOpen">
           {{ warehouseOpen ? '隐藏仓库货物' : '展开仓库货物' }}
         </button>
-        <button v-else class="home-button" @click="restart">← 返回首页</button>
         <div class="offline-badge" :class="{ offline: !isOnline }" role="status" aria-live="polite">
           ● {{ isOnline ? '在线模式' : '离线模式' }}
         </div>
@@ -315,7 +334,7 @@ onBeforeUnmount(() => {
           <p class="chapter">货架缺货</p>
           <h2 id="restock-title">{{ missingProduct.name }}不存在</h2>
           <p v-if="restockBlockedReason" class="restock-warning">{{ restockBlockedReason }}</p>
-          <p v-else>顾客正在等待。回仓库补货将消耗 10 秒，本局还可补货 {{ MAX_RESTOCKS - restockCount }} 次。</p>
+          <p v-else>顾客正在等待。回仓库补货不消耗时间，本局还可补货 {{ MAX_RESTOCKS - restockCount }} 次。</p>
           <div class="restock-actions" :class="{ single: restockBlockedReason }">
             <button v-if="!restockBlockedReason" class="secondary" @click="skipRestock">暂不补货</button>
             <button v-if="!restockBlockedReason" class="primary" @click="goToWarehouse">回仓库补货</button>
@@ -373,7 +392,7 @@ onBeforeUnmount(() => {
             <div><strong>你的任务</strong><span>亲手尝试两种营业方式，看看会有什么样的收入变化。</span></div>
           </div>
           <div class="landing-facts">
-            <span><b>30/60</b> 秒一局</span><span><b>2</b> 种模式</span>
+            <span><b>60</b> 秒一局</span><span><b>2</b> 种模式</span>
           </div>
           <button class="primary start-business" @click="phase = 'mode-select'">领取营业执照 · 开始营业 <span>→</span>
           </button>
@@ -401,8 +420,8 @@ onBeforeUnmount(() => {
             <div class="mode-options">
               <button class="mode-card plan-card" @click="startRound('plan')">
                 <small>计划经济时期</small><strong>A 计划模式</strong><b>商品固定，价格统一</b>
-                <span class="mode-rule">🔒 12 种固定旧商品 · 30 秒</span>
-                <p>货架更满了，但商品偏旧，顾客常常只能将就选择。</p>
+                <span class="mode-rule">🔒 12 种固定旧商品 · 60 秒</span>
+                <p>货架更满了，但商品偏旧，顾客常常只能将就选购。</p>
                 <span class="mode-enter"><span>进入 A 计划模式</span><span>→</span></span>
               </button>
               <span class="versus" aria-hidden="true">VS</span>
@@ -435,13 +454,15 @@ onBeforeUnmount(() => {
             }}”</p>
         </div>
         <div class="speaker owner-speaker">
+          <button class="no-stock-button" :disabled="planServed.includes(planCustomerIndex)"
+                  aria-label="回复顾客本店没货" @click="declinePlanCustomer">回复没货</button>
           <p :key="message" class="speech owner-speech" :class="{ placeholder: !message }">“{{ message }}”</p>
           <span class="owner-icon" aria-hidden="true">🧑‍💼</span>
           <strong>老板</strong>
         </div>
       </section>
       <section class="shelf-grid plan-shelves">
-        <button v-for="product in PLAN_PRODUCTS" :key="product.id" class="shelf-item"
+        <button v-for="product in planShelf" :key="product.id" class="shelf-item"
                 @click="answerPlanCustomer(product)">
           <span class="lock">🔒</span><span class="product-icon"
                                            :class="{ 'white-cloth-shoe': product.id === 'cloth-shoes' }">{{
@@ -456,8 +477,8 @@ onBeforeUnmount(() => {
     <section v-else-if="phase === 'plan-result'" class="panel result">
       <p class="chapter">A 店结算</p>
       <h2>今日营业额：{{ plan.revenue }} 元</h2>
-      <div class="stars">{{ plan.revenue > 0 ? '⭐⭐☆☆☆' : '⭐☆☆☆☆' }}</div>
-      <p>卖出 {{ plan.sold }} 件商品。商品种类虽然增加了，但很多旧货仍不完全符合顾客期待。</p>
+      <div class="stars" v-if="planResult">{{ '⭐'.repeat(planResult.stars) }}{{ '☆'.repeat(5 - planResult.stars) }}</div>
+      <p v-if="planResult">成交 {{ planResult.sold }} 件商品。</p>
       <button class="primary" @click="restart">回到首页</button>
     </section>
 
@@ -468,7 +489,7 @@ onBeforeUnmount(() => {
         <div class="score"><b>¥{{
             market.revenue
           }}</b><span>{{
-            marketStage === 'selling' ? `⏱ ${timeLeft} 秒` : marketStage === 'restocking' ? `⏸ ${timeLeft} 秒` : '营业前备货'
+            marketStage === 'selling' || marketStage === 'restocking' ? `⏱ ${timeLeft} 秒` : '营业前备货'
           }}</span></div>
       </section>
       <section v-if="marketStage === 'selling'" class="dialogue-stage market-dialogue" aria-label="顾客与老板的对话">
@@ -488,7 +509,7 @@ onBeforeUnmount(() => {
         <div>
           <h3>{{ marketStage === 'restocking' ? '老板去仓库补货' : '营业前货物准备' }}</h3>
           <p v-if="marketStage === 'restocking'"><strong>老板：</strong>“等我去查下仓库进货。”
-            顾客正在等待“{{ currentCustomer.request }}”，倒计时已暂停。</p>
+            顾客正在等待“{{ currentCustomer.request }}”，倒计时仍在继续，请抓紧补货。</p>
           <p v-else>移动到空货架上松开鼠标。</p>
         </div>
       </section>
@@ -528,7 +549,9 @@ onBeforeUnmount(() => {
       <div class="stars">{{ '⭐'.repeat(stars) }}{{ '☆'.repeat(5 - stars) }}</div>
       <p>成交 {{ market.sold }} 件商品 · 接待 {{ market.customers }} 位顾客</p>
       <p>{{ marketComment }}</p>
-      <div class="comparison"><span>A 店<br><b>0 元 · 1 星</b></span><span>B 店<br><b>{{ market.revenue }} 元 · {{
+      <div class="comparison"><span>A 店<br><b>{{
+          planResult ? planResult.revenue + ' 元 · ' + planResult.stars + ' 星' : '未结算'
+        }}</b></span><span>B 店<br><b>{{ market.revenue }} 元 · {{
           stars
         }} 星</b></span></div>
       <button class="primary" @click="restart">再玩一次</button>
