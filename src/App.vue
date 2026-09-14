@@ -15,6 +15,8 @@ const MARKET_ROUND_SECONDS = 60
 const MIN_INITIAL_STOCK = 6
 const MAX_RESTOCKS = 6
 const PLAN_CUSTOMER_SWITCHES = [50, 40, 30, 20, 10]
+const PLAN_REVENUE_TARGET = 20
+const MARKET_REVENUE_TARGET = 150
 const phase = ref('intro')
 const timeLeft = ref(ROUND_SECONDS)
 const planCustomerIndex = ref(0)
@@ -40,7 +42,15 @@ let timer
 let nextCustomerTimer
 
 const planCustomer = computed(() => planQueue.value[planCustomerIndex.value] || PLAN_CUSTOMERS[0])
-const stars = computed(() => Math.max(1, Math.round((market.happiness / Math.max(1, market.customers * 2)) * 5)))
+function scoreToStars(score) {
+  return Math.min(5, Math.max(1, Math.round(score * 5)))
+}
+
+const stars = computed(() => {
+  const satisfaction = market.happiness / Math.max(1, market.customers * 2)
+  const revenueScore = Math.min(1, market.revenue / MARKET_REVENUE_TARGET)
+  return scoreToStars((satisfaction + revenueScore) / 2)
+})
 const marketComment = computed(() => stars.value >= 4
     ? '商品丰富，顾客盈门！'
     : '留意顾客需求和商品搭配，生意会更好。')
@@ -50,11 +60,9 @@ const restockBlockedReason = computed(() => {
 })
 
 function computePlanStars() {
-  if (plan.sold === 0) return 1
-  const ratio = plan.matched / plan.sold
-  if (ratio >= 0.8) return 3
-  if (ratio >= 0.4) return 2
-  return 1
+  const satisfaction = plan.sold === 0 ? 0 : plan.matched / plan.sold
+  const revenueScore = Math.min(1, plan.revenue / PLAN_REVENUE_TARGET)
+  return scoreToStars((satisfaction + revenueScore) / 2)
 }
 
 function clearGameTimers() {
